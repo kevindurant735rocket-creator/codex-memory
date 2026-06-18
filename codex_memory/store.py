@@ -1,5 +1,5 @@
-"""SQLite-backed memory store. One table, FTS5 index, auto-compaction."""
-import sqlite3, json, time
+"""SQLite-backed memory store. FTS5 trigram tokenizer for CJK support."""
+import sqlite3, time
 from pathlib import Path
 
 SCHEMA = """
@@ -12,7 +12,12 @@ CREATE TABLE IF NOT EXISTS memories (
     updated INTEGER NOT NULL,
     access_count INTEGER DEFAULT 0
 );
-CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(key, value, content='memories', content_rowid='id');
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+    key, value,
+    content='memories',
+    content_rowid='id',
+    tokenize='trigram'
+);
 CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
     INSERT INTO memories_fts(rowid, key, value) VALUES (new.id, new.key, new.value);
 END;
