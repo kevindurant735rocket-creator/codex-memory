@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: codex-memory
+Version: 0.1.0
+Summary: 超轻量 AI 持久记忆系统: SQLite + FTS5, 单条<200字节
+Requires-Python: >=3.10
