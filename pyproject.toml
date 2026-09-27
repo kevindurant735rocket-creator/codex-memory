@@ -1,8 +1,10 @@
 [project]
 name = "codex-memory"
-version = "0.1.0"
-description = "超轻量 AI 持久记忆系统: SQLite + FTS5, 单条<200字节"
+version = "0.2.0"
+description = "超轻量 AI 持久记忆系统: SQLite+FTS5, 单条<200字节"
 requires-python = ">=3.10"
 dependencies = []
+[project.optional-dependencies]
+test = ["pytest>=7"]
 [project.scripts]
 cm = "codex_memory.cli:main"
