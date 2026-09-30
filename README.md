@@ -1,9 +1,7 @@
 # codex-memory
 
 Cross-session memory for agents: a SQLite table with an FTS5 index, one
-`MemoryStore` class, one `cm` CLI. Standard library only.
-
-~280 lines of implementation, 193 lines of tests, 31 tests passing.
+`MemoryStore` class, one `cm` CLI. Standard library only, 31 tests passing.
 
 ## Real output
 
@@ -32,8 +30,8 @@ $ cm search "雅思"
 ✗ 搜索失败: query must be at least 3 characters (trigram tokenizer cannot match shorter terms), got 2
 ```
 
-The 3-character floor is enforced with an explicit error, not a silent empty
-result. `cm search "user/name"` works because keys are data, not FTS syntax.
+The 3-character floor is an explicit error, not a silent empty result.
+`cm search "user/name"` works because keys are data, not FTS syntax.
 
 ```
 $ python -m pytest tests -q
@@ -76,12 +74,10 @@ with MemoryStore() as s:                      # ~/.codex-memory/store.db
     s.get("pref/style")
     s.forget("pref/style")                     # False if absent
     s.stats()                                  # entries/bytes/searchable/unindexed
-    s.close()
 ```
 
-**The DB path is hardcoded.** `MemoryStore()` with no argument resolves to
-`~/.codex-memory/store.db`. The `cm` CLI passes no path and has no `--db` flag,
-so there is no way to point the CLI at another database.
+`MemoryStore(path)` accepts a str or `Path`, but `cm` passes no path and has no
+`--db` flag — the CLI is locked to `~/.codex-memory/store.db`.
 
 ## What it does under the hood
 
@@ -89,19 +85,18 @@ so there is no way to point the CLI at another database.
   table, `tokenize='trigram'`.
 - Three triggers mirror writes: `memories_ai` (insert into FTS),
   `memories_ad` (FTS `'delete'` command), `memories_au` (delete + re-insert).
-- **Every token in a query is double-quoted** (`build_match_query`) before it
-  reaches `MATCH`, so `/`, quotes, and other FTS metacharacters are treated as
-  literals. This is what makes `user/name` keys searchable.
-- `_repair_triggers()` runs on open: if `memories_au` does not contain the
-  delete-then-insert statement, it drops the trigger, recreates the schema, and
-  rebuilds the index if `unsearchable_count()` is nonzero. Sets
-  `migrated_from_legacy`.
+- **Every query token is double-quoted** (`build_match_query`) before reaching
+  `MATCH`, so `/` and other FTS metacharacters are literals. This is what makes
+  `user/name` keys searchable.
+- `_repair_triggers()` runs on open: if `memories_au` lacks the
+  delete-then-insert statement, it drops and recreates the trigger, then rebuilds
+  the index if `unsearchable_count()` is nonzero. Sets `migrated_from_legacy`.
 - `unsearchable_count()` probes each row with a MATCH on its own leading
-  whitespace-delimited token — because a row can keep its rowid while having
-  empty index content, a rowid join would report a corrupt store as healthy.
-- `compact(days)` truncates values in place: `substr(value, 1, 200) || '…'`,
-  only where `updated <= cutoff` and `kind != 'summary'` and `length > 200`.
-  Keys, rows, and index entries all survive.
+  token — a row can keep its rowid with empty index content, so a rowid join
+  would report a corrupt store as healthy.
+- `compact(days)` truncates in place: `substr(value, 1, 200) || '…'`, where
+  `updated <= cutoff` and `kind != 'summary'` and `length > 200`. Keys, rows,
+  and index entries all survive.
 
 ## Why the triggers matter
 
@@ -115,47 +110,39 @@ s.recall("token")   # hit
 s.recall("token")   # gone
 ```
 
-The current trigger re-writes the row. Regression tests
-(`test_reading_does_not_break_search`, `test_every_row_stays_indexed_after_reads`)
-pin this. `test_detects_content_loss_even_when_rowids_look_healthy` covers the
-rowid-count blind spot; note that FTS5's own `integrity-check` passes silently on
-this corruption, which is why the check is a real MATCH probe.
+Regression tests pin this (`test_reading_does_not_break_search`,
+`test_every_row_stays_indexed_after_reads`). Note that FTS5's own
+`integrity-check` passes silently on this corruption, which is why the audit is
+a real MATCH probe.
 
 ## What this is not
 
 - **Not an agent memory framework.** No LLM calls, no summarization, no
   embeddings, no recall-and-inject loop, no decay, no salience scoring. It is a
-  keyed table with full-text search. Whatever decides *what* to store is your
-  job.
+  keyed table with full-text search. What to store is your decision.
 - **Not vector search.** FTS5 trigram only — substring matching over 3-character
-  windows. No semantic similarity; `"简洁"` does not find `"简洁直接"` as a
-  concept, only as a literal substring.
+  windows. No semantic similarity.
 - **Queries under 3 characters are rejected**, including CJK
-  (`cm search "雅思"` errors). Substring matching also means a query can match
+  (`cm search "雅思"` errors). Substring matching also means a query hits
   mid-word.
 - **No FTS5 query syntax is exposed.** Tokens are quoted literals, so `AND`,
   `OR`, `NEAR`, `*`, and column filters are inert — you cannot filter by `kind`
   or boost by `access_count`.
 - **`cm profile` reads a file nothing writes.** It parses
   `~/.codex-memory/profile.json` and expects `name`, `github`, `tech_areas`,
-  `style`, `projects`, `ai_roles`, `session_key`. No code in this repo creates
-  that file, so out of the box it always prints
-  `(无用户画像, 用 cm add 开始记忆)`. It is also a hardcoded personal profile
-  shape, not a general feature.
-- **`cm` always writes to your home directory.** No `--db`, no `--path`. Do not
-  run it in an environment where you do not want `~/.codex-memory/` created.
+  `style`, `projects`, `ai_roles`, `session_key`. No code here creates that file,
+  so out of the box it always prints `(无用户画像, 用 cm add 开始记忆)`.
+- **`cm` always writes to your home directory.** No `--db`, no `--path`. Avoid
+  running it where you do not want `~/.codex-memory/` created.
 - **No concurrency control.** Plain `sqlite3.connect` in default mode, no WAL,
-  no `busy_timeout`, no locking strategy. Concurrent writers will hit
-  `database is locked`.
-- **`compact` is irreversible truncation, and its counter is easy to misread.**
-  It returns `rowcount` from one `UPDATE`, and it also overwrites `updated` with
-  the current time — so compacted rows look freshly modified to the next
-  `compact` call.
-- **No migrations framework.** Schema changes rely on `CREATE ... IF NOT
-  EXISTS` plus a manual trigger check. There is no version table.
+  no `busy_timeout`. Concurrent writers hit `database is locked`.
+- **`compact` is irreversible truncation and it overwrites `updated`** with the
+  current time, so compacted rows look freshly modified to the next call.
+- **No migrations framework.** Schema changes rely on `CREATE ... IF NOT EXISTS`
+  plus a manual trigger check. There is no version table.
 - **Not published to PyPI** — install from a clone. There is no `.github`
-  workflow in this repo; the previous README claimed CI across Python
-  3.10–3.13, which does not exist here. Run the tests yourself.
+  workflow here; the previous README claimed CI across Python 3.10–3.13, which
+  does not exist. Run the tests yourself.
 
 ## Requirements
 
