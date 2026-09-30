@@ -45,7 +45,8 @@ pip install -e .
 ```
 
 Python 3.10+ (uses `str | None`). No runtime dependencies — FTS5 ships with
-CPython's bundled SQLite. Installs the `cm` console script.
+CPython's bundled SQLite. Installs the `cm` console script. `pip install -e
+".[test]"` adds pytest.
 
 ## Usage
 
@@ -86,17 +87,16 @@ with MemoryStore() as s:                      # ~/.codex-memory/store.db
 - Three triggers mirror writes: `memories_ai` (insert into FTS),
   `memories_ad` (FTS `'delete'` command), `memories_au` (delete + re-insert).
 - **Every query token is double-quoted** (`build_match_query`) before reaching
-  `MATCH`, so `/` and other FTS metacharacters are literals. This is what makes
+  `MATCH`, so `/` and other FTS metacharacters are literals — this is what makes
   `user/name` keys searchable.
 - `_repair_triggers()` runs on open: if `memories_au` lacks the
-  delete-then-insert statement, it drops and recreates the trigger, then rebuilds
-  the index if `unsearchable_count()` is nonzero. Sets `migrated_from_legacy`.
-- `unsearchable_count()` probes each row with a MATCH on its own leading
-  token — a row can keep its rowid with empty index content, so a rowid join
-  would report a corrupt store as healthy.
+  delete-then-insert statement it drops and recreates it, then rebuilds the index
+  if `unsearchable_count()` is nonzero. Sets `migrated_from_legacy`.
+- `unsearchable_count()` probes each row with a MATCH on its own leading token —
+  a row can keep its rowid with empty index content, so a rowid join would
+  report a corrupt store as healthy.
 - `compact(days)` truncates in place: `substr(value, 1, 200) || '…'`, where
-  `updated <= cutoff` and `kind != 'summary'` and `length > 200`. Keys, rows,
-  and index entries all survive.
+  `updated <= cutoff` and `kind != 'summary'` and `length > 200`.
 
 ## Why the triggers matter
 
@@ -112,19 +112,16 @@ s.recall("token")   # gone
 
 Regression tests pin this (`test_reading_does_not_break_search`,
 `test_every_row_stays_indexed_after_reads`). Note that FTS5's own
-`integrity-check` passes silently on this corruption, which is why the audit is
+`integrity-check` passes silently on this corruption — which is why the audit is
 a real MATCH probe.
 
 ## What this is not
 
 - **Not an agent memory framework.** No LLM calls, no summarization, no
-  embeddings, no recall-and-inject loop, no decay, no salience scoring. It is a
-  keyed table with full-text search. What to store is your decision.
+  embeddings, no recall-and-inject loop, no decay. It is a keyed table with
+  full-text search.
 - **Not vector search.** FTS5 trigram only — substring matching over 3-character
-  windows. No semantic similarity.
-- **Queries under 3 characters are rejected**, including CJK
-  (`cm search "雅思"` errors). Substring matching also means a query hits
-  mid-word.
+  windows, so queries hit mid-word and there is no semantic similarity.
 - **No FTS5 query syntax is exposed.** Tokens are quoted literals, so `AND`,
   `OR`, `NEAR`, `*`, and column filters are inert — you cannot filter by `kind`
   or boost by `access_count`.
@@ -132,14 +129,13 @@ a real MATCH probe.
   `~/.codex-memory/profile.json` and expects `name`, `github`, `tech_areas`,
   `style`, `projects`, `ai_roles`, `session_key`. No code here creates that file,
   so out of the box it always prints `(无用户画像, 用 cm add 开始记忆)`.
-- **`cm` always writes to your home directory.** No `--db`, no `--path`. Avoid
-  running it where you do not want `~/.codex-memory/` created.
+- **`cm` always writes to your home directory.** No `--db`, no `--path`.
 - **No concurrency control.** Plain `sqlite3.connect` in default mode, no WAL,
   no `busy_timeout`. Concurrent writers hit `database is locked`.
 - **`compact` is irreversible truncation and it overwrites `updated`** with the
   current time, so compacted rows look freshly modified to the next call.
-- **No migrations framework.** Schema changes rely on `CREATE ... IF NOT EXISTS`
-  plus a manual trigger check. There is no version table.
+- **No migrations framework** — schema changes rely on `CREATE ... IF NOT
+  EXISTS` plus a manual trigger check, with no version table.
 - **Not published to PyPI** — install from a clone. There is no `.github`
   workflow here; the previous README claimed CI across Python 3.10–3.13, which
   does not exist. Run the tests yourself.
@@ -147,7 +143,7 @@ a real MATCH probe.
 ## Requirements
 
 Python 3.10+, SQLite with FTS5 enabled (CPython's bundled build has it). No
-runtime dependencies. `pip install -e ".[test]"` adds pytest for the suite.
+runtime dependencies.
 
 ## License
 
